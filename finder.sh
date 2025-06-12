@@ -120,6 +120,8 @@ esac
 suffix=""
 [ "$exclude_flag" = true ] && suffix="_x"
 cache_file="$CACHE_DIR/${type_label}_${scope_label}${suffix}.cache"
+search_output_file="$CACHE_DIR/search_temp_output.txt"
+> "$search_output_file"
 
 # --- Cache Handling ---
 if [ -f "$cache_file" ]; then
@@ -143,17 +145,14 @@ if [ ! -f "$cache_file" ]; then
       [[ -n "$line" ]] && exclude_terms+=("$line")
     done < "$EXCLUDE_FILE"
 
-    # Build a clean find command with exclusions
     find_args=(. $find_options)
     for ex in "${exclude_terms[@]}"; do
       find_args+=(-path "*/$ex" -prune -o)
     done
     find_args+=(-type "$file_type" -print)
 
-    # Run the find command safely
     find "${find_args[@]}" > "$cache_file" &
   else
-    # Simple non-excluded find
     find . $find_options -type "$file_type" -print > "$cache_file" &
   fi
 
@@ -163,33 +162,30 @@ fi
 # --- Run Search ---
 echo "--------------------------------------"
 echo "🔍 Searching..."
-matches_found=false
-pattern_lower=$(echo "$pattern" | tr '[:upper:]' '[:lower:]')
+[ "$save_results" = true ] && > "$LAST_SEARCH"
 
 run_search() {
+  shopt -s nocasematch
   while IFS= read -r line; do
     name_part=$(basename "$line")
-    name_lower=$(echo "$name_part" | tr '[:upper:]' '[:lower:]')
-
-    if [[ "$name_lower" == $pattern_lower ]]; then
+    if [[ "$name_part" == $pattern ]]; then
       echo "$line"
-      matches_found=true
-      echo "$line" >> "$LAST_SEARCH"
+      echo "$line" >> "$search_output_file"
+      [ "$save_results" = true ] && echo "$line" >> "$LAST_SEARCH"
     fi
   done < "$cache_file"
+  shopt -u nocasematch
 }
-
-# Clear previous last search
-[ "$save_results" = true ] && > "$LAST_SEARCH"
 
 run_search &
 search_pid=$!
 spinner "$search_pid"
 wait "$search_pid"
 
-if [ "$matches_found" = false ]; then
+if [[ ! -s "$search_output_file" ]]; then
   echo "🔍 No matches found."
 fi
+rm -f "$search_output_file"
 
 echo "--------------------------------------"
 echo "✅ Search complete."
